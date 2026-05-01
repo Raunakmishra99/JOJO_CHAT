@@ -117,7 +117,6 @@ export default function Chat() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
  
-  // Restore session (no images ever restored)
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem(STORAGE_KEY);
@@ -131,7 +130,6 @@ export default function Chat() {
     } catch {}
   }, []);
  
-  // Save session (never save images)
   useEffect(() => {
     const complete = messages.filter((m) => m.content !== "");
     if (complete.length === 0) return;
@@ -143,12 +141,10 @@ export default function Chat() {
     } catch {}
   }, [messages, timestamps]);
  
-  // Scroll to bottom
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
  
-  // Clear on tab close
   useEffect(() => {
     const clear = () => sessionStorage.removeItem(STORAGE_KEY);
     window.addEventListener("beforeunload", clear);
@@ -244,46 +240,37 @@ export default function Chat() {
  
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
  
-        html { height: 100%; height: -webkit-fill-available; }
- 
-        body {
-          font-family: 'Lora', Georgia, serif;
+        html, body {
+          height: 100%;
           overflow: hidden;
           background: #120608;
-          height: 100%;
-          min-height: -webkit-fill-available;
+          font-family: 'Lora', Georgia, serif;
         }
  
-        /* ROOT — mobile keyboard fix: use dvh with fallback */
+        /*
+          THE REAL MOBILE KEYBOARD FIX:
+          position: fixed + inset: 0 locks the layout
+          to the visual viewport. The keyboard opens
+          on top — the app does not move or resize.
+        */
         .chat-root {
+          position: fixed;
+          inset: 0;
           display: flex;
           flex-direction: column;
-          height: 100vh;
-          height: 100dvh;
-          max-height: -webkit-fill-available;
-          position: relative;
-          overflow: hidden;
           background: #120608;
+          overflow: hidden;
         }
  
         /* BACKGROUND */
-        .bg-layer-base {
-          position: fixed; inset: 0; z-index: 0;
-          background: radial-gradient(ellipse at 25% 15%, #2a0c18 0%, #160709 45%, #0c0405 100%);
-        }
+        .bg-layer-base { position: fixed; inset: 0; z-index: 0; background: radial-gradient(ellipse at 25% 15%, #2a0c18 0%, #160709 45%, #0c0405 100%); }
         .bg-aurora { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
         .aurora-orb { position: absolute; border-radius: 50%; filter: blur(90px); animation: auroraFloat linear infinite; mix-blend-mode: screen; }
         .ao1 { width: 520px; height: 520px; top: -130px; left: -90px; background: radial-gradient(circle, rgba(170,35,65,0.2) 0%, transparent 70%); animation-duration: 24s; }
         .ao2 { width: 420px; height: 420px; top: 25%; right: -110px; background: radial-gradient(circle, rgba(110,25,75,0.16) 0%, transparent 70%); animation-duration: 30s; animation-delay: -9s; }
         .ao3 { width: 620px; height: 320px; bottom: -90px; left: 5%; background: radial-gradient(circle, rgba(190,70,50,0.1) 0%, transparent 70%); animation-duration: 38s; animation-delay: -16s; }
         .ao4 { width: 280px; height: 280px; top: 45%; left: 35%; background: radial-gradient(circle, rgba(240,130,90,0.07) 0%, transparent 70%); animation-duration: 22s; animation-delay: -6s; }
-        @keyframes auroraFloat {
-          0%   { transform: translate(0,0) scale(1); }
-          25%  { transform: translate(45px,-35px) scale(1.09); }
-          50%  { transform: translate(-25px,55px) scale(0.94); }
-          75%  { transform: translate(65px,25px) scale(1.06); }
-          100% { transform: translate(0,0) scale(1); }
-        }
+        @keyframes auroraFloat { 0% { transform: translate(0,0) scale(1); } 25% { transform: translate(45px,-35px) scale(1.09); } 50% { transform: translate(-25px,55px) scale(0.94); } 75% { transform: translate(65px,25px) scale(1.06); } 100% { transform: translate(0,0) scale(1); } }
         .bg-stars { position: fixed; inset: 0; z-index: 2; pointer-events: none; }
         .star { position: absolute; border-radius: 50%; background: rgba(255,215,195,0.55); animation: twinkle ease-in-out infinite; }
         @keyframes twinkle { 0%,100% { opacity: 0.08; transform: scale(0.7); } 50% { opacity: 0.85; transform: scale(1.3); } }
@@ -293,16 +280,7 @@ export default function Chat() {
         .bg-vignette { position: fixed; inset: 0; z-index: 4; pointer-events: none; background: radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(8,2,6,0.6) 100%); }
  
         /* HEADER */
-        .header {
-          position: relative; z-index: 20;
-          display: flex; align-items: center; gap: 14px;
-          padding: 12px 18px;
-          background: rgba(22,6,14,0.75);
-          backdrop-filter: blur(28px);
-          border-bottom: 1px solid rgba(190,70,70,0.16);
-          flex-shrink: 0;
-          box-shadow: 0 2px 30px rgba(130,25,45,0.18);
-        }
+        .header { position: relative; z-index: 20; display: flex; align-items: center; gap: 14px; padding: 12px 18px; background: rgba(22,6,14,0.75); backdrop-filter: blur(28px); border-bottom: 1px solid rgba(190,70,70,0.16); flex-shrink: 0; box-shadow: 0 2px 30px rgba(130,25,45,0.18); }
         .avatar-wrap { position: relative; flex-shrink: 0; }
         .avatar { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(135deg, #b04535 0%, #7a2030 50%, #5a1020 100%); display: flex; align-items: center; justify-content: center; font-family: 'Dancing Script', cursive; font-size: 17px; color: #ffd0c0; font-weight: 600; box-shadow: 0 4px 20px rgba(160,45,45,0.45); }
         .avatar-ring { position: absolute; inset: -3px; border-radius: 50%; border: 1.5px solid rgba(190,110,90,0.45); animation: avatarPulse 3.5s ease-in-out infinite; }
@@ -315,7 +293,7 @@ export default function Chat() {
         .new-chat-btn { font-size: 12px; color: rgba(210,140,120,0.8); background: rgba(185,70,55,0.1); border: 1px solid rgba(190,90,70,0.2); border-radius: 20px; padding: 6px 13px; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 5px; font-family: 'Lora', serif; }
         .new-chat-btn:hover { background: rgba(185,70,55,0.2); color: #f0aca8; }
  
-        /* MESSAGES */
+        /* MESSAGES — flex:1 + overflow-y:auto means it fills space and scrolls internally */
         .messages-area { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 20px 14px 14px; display: flex; flex-direction: column; gap: 14px; position: relative; z-index: 10; scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
         .messages-area::-webkit-scrollbar { width: 3px; }
         .messages-area::-webkit-scrollbar-track { background: transparent; }
@@ -351,43 +329,17 @@ export default function Chat() {
         .date-divider::before, .date-divider::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(190,95,75,0.18), transparent); }
         .date-text { font-size: 10px; color: rgba(170,105,85,0.48); font-style: italic; }
  
-        /* INPUT AREA */
-        .input-area {
-          position: relative; z-index: 20;
-          padding: 10px 14px 14px;
-          background: rgba(16,5,10,0.75);
-          backdrop-filter: blur(26px);
-          border-top: 1px solid rgba(190,75,55,0.14);
-          flex-shrink: 0;
-        }
+        /* INPUT — flex-shrink:0 keeps it pinned at the bottom */
+        .input-area { position: relative; z-index: 20; padding: 10px 14px 18px; background: rgba(16,5,10,0.75); backdrop-filter: blur(26px); border-top: 1px solid rgba(190,75,55,0.14); flex-shrink: 0; }
         .pending-image-preview { display: flex; align-items: center; gap: 10px; background: rgba(185,70,55,0.1); border: 1px solid rgba(190,95,75,0.22); border-radius: 12px; padding: 7px 11px; margin-bottom: 8px; }
         .pending-thumb { width: 38px; height: 38px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
         .pending-name { flex: 1; font-size: 12px; color: rgba(210,145,125,0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-style: italic; }
         .pending-remove { background: none; border: none; color: rgba(195,95,75,0.75); cursor: pointer; font-size: 18px; line-height: 1; flex-shrink: 0; }
         .poem-mode-badge { display: flex; align-items: center; gap: 6px; background: rgba(170,75,35,0.11); border: 1px solid rgba(195,115,75,0.22); border-radius: 8px; padding: 6px 11px; margin-bottom: 8px; font-size: 12px; color: rgba(215,155,115,0.85); font-style: italic; font-family: 'Lora', serif; }
- 
-        /* INPUT ROW — align-items center keeps textarea vertically centred */
-        .input-row {
-          display: flex; align-items: center; gap: 8px;
-          background: rgba(255,255,255,0.055);
-          border: 1.5px solid rgba(190,95,75,0.22);
-          border-radius: 26px;
-          padding: 6px 7px 6px 13px;
-          transition: border-color 0.2s, box-shadow 0.2s;
-        }
+        .input-row { display: flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.055); border: 1.5px solid rgba(190,95,75,0.22); border-radius: 26px; padding: 6px 7px 6px 13px; transition: border-color 0.2s, box-shadow 0.2s; }
         .input-row:focus-within { border-color: rgba(190,75,55,0.48); box-shadow: 0 0 0 3px rgba(190,75,55,0.07); }
- 
-        /* TEXTAREA — overflow:hidden kills the scrollbar */
-        .chat-textarea {
-          flex: 1; background: transparent; border: none; outline: none;
-          font-family: 'Lora', serif; font-size: 14px; color: #f0cebc;
-          resize: none; line-height: 1.55;
-          max-height: 120px; min-height: 22px;
-          padding: 0; align-self: center;
-          overflow: hidden;
-        }
+        .chat-textarea { flex: 1; background: transparent; border: none; outline: none; font-family: 'Lora', serif; font-size: 14px; color: #f0cebc; resize: none; line-height: 1.55; max-height: 120px; min-height: 22px; padding: 0; align-self: center; overflow: hidden; }
         .chat-textarea::placeholder { color: rgba(170,110,90,0.48); font-style: italic; }
- 
         .icon-btn { background: none; border: none; cursor: pointer; color: rgba(190,110,90,0.65); display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; transition: background 0.2s, color 0.2s, transform 0.15s; flex-shrink: 0; }
         .icon-btn:hover { background: rgba(185,70,55,0.14); color: #efaaa0; transform: scale(1.1); }
         .icon-btn.active { background: rgba(185,95,55,0.2); color: #efaaa0; }
