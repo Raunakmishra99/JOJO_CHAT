@@ -18,3 +18,16 @@ body {
   background: #120608;
   overscroll-behavior: none;
 }
+
+/* Mobile viewport fit: use small viewport height (accounts for
+   mobile browser toolbars) with dvh as the modern fallback, and
+   respect notch / home-indicator safe areas. */
+:root {
+  --app-height: 100svh;
+}
+
+@supports (height: 100dvh) {
+  :root {
+    --app-height: 100dvh;
+  }
+}

@@ -1,6 +1,6 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
- 
+
 export const metadata: Metadata = {
   title: "Yours R",
   description: "A little piece of me, always here for you.",
@@ -8,7 +8,14 @@ export const metadata: Metadata = {
     icon: "/favicon.svg",
   },
 };
- 
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -20,4 +27,3 @@ export default function RootLayout({
     </html>
   );
 }
- 
