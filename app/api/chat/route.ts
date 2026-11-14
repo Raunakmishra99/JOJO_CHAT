@@ -159,8 +159,8 @@ Profile context:
 ${profileText}
 `.trim();
 
-const MODEL = process.env.GROQ_MODEL || "qwen/qwen3.8-27b";
-const MAX_COMPLETION_TOKENS = 700;
+const TEXT_MODEL = process.env.GROQ_TEXT_MODEL || "openai/gpt-oss-120b";
+const VISION_MODEL = process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b";
 const MAX_HISTORY_MESSAGES = 4;
 const MAX_HISTORY_CHARS = 1200;
 
@@ -169,6 +169,10 @@ class GroqRateLimitError extends Error {
     super("Groq rate limit reached");
     this.name = "GroqRateLimitError";
   }
+}
+
+function hasImage(messages: Message[]): boolean {
+  return Array.isArray(messages[messages.length - 1].content);
 }
 
 async function callGroq(
@@ -181,6 +185,20 @@ async function callGroq(
     throw new Error("GROQ_API_KEY is not configured");
   }
 
+  // Text goes to GPT-OSS (supports prompt caching, so the long system prompt
+  // barely counts toward the rate limit). Photos go to Qwen (GPT-OSS is text-only).
+  // GPT-OSS thinks before answering: keep that short, hide it, and leave room
+  // for those thinking tokens inside the completion cap.
+  const vision = hasImage(messages);
+  const model = vision ? VISION_MODEL : TEXT_MODEL;
+  const modelOptions = vision
+    ? { reasoning_effort: "none", max_completion_tokens: 700 }
+    : {
+        reasoning_effort: "low",
+        include_reasoning: false,
+        max_completion_tokens: 1200,
+      };
+
   return fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -188,11 +206,10 @@ async function callGroq(
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: MODEL,
+      model,
       messages,
       temperature,
-      max_completion_tokens: MAX_COMPLETION_TOKENS,
-      reasoning_effort: "none",
+      ...modelOptions,
       stream: false,
     }),
   });
@@ -226,9 +243,44 @@ async function generate(
   }
 
   const data = await res.json();
+  // Temporary: shows whether prompt caching is working. Remove once confirmed.
+  console.log(
+    "prompt tokens:",
+    data?.usage?.prompt_tokens,
+    "cached:",
+    data?.usage?.prompt_tokens_details?.cached_tokens ?? 0
+  );
+
   const result = data?.choices?.[0]?.message?.content;
 
   return typeof result === "string" ? result.trim() : "";
+}
+
+const norm = (t: string) =>
+  t
+    .toLowerCase()
+    .replace(/[^a-z0-9\u0900-\u097f]+/g, " ")
+    .trim();
+
+// True when a draft is empty or says (nearly) the same thing as a recent reply.
+function isRepeat(draft: string, previous: string[]): boolean {
+  const a = norm(draft);
+  if (!a) return true;
+
+  return previous.some((p) => {
+    const b = norm(p);
+    if (a === b) return true;
+
+    const wa = new Set(a.split(" "));
+    const wb = new Set(b.split(" "));
+    if (wa.size < 4 || wb.size < 4) return false;
+
+    let shared = 0;
+    wa.forEach((w) => {
+      if (wb.has(w)) shared++;
+    });
+    return shared / Math.min(wa.size, wb.size) >= 0.8;
+  });
 }
 
 /**
@@ -383,6 +435,22 @@ Write an original poem with a coherent emotional journey. Do not force a fixed n
     const temperature = poemMode ? 0.9 : 0.75;
     let text = await generate(messages, temperature);
 
+    // If the draft repeats a recent reply, try once more with extra variety.
+    if (!poemMode && isRepeat(text, previousReplies)) {
+      try {
+        const retry = withNote(
+          messages,
+          `[private note: your draft "${text
+            .replace(/\s+/g, " ")
+            .slice(0, 200)}" repeats what you already said. Write something completely different: respond to what she just said, in new words.]`
+        );
+        const second = await generate(retry, 0.95);
+        if (second) text = second;
+      } catch {
+        // keep the first draft
+      }
+    }
+
     if (!text) {
       text = poemMode
         ? "kuch alfaaz abhi theek se ban nahi rahe... ek minute 😭"
@@ -403,11 +471,14 @@ Write an original poem with a coherent emotional journey. Do not force a fixed n
       );
 
       return new Response(
-        `groq's taking a little breather... try again in about ${err.retryAfterSeconds} seconds 😭`,
+        JSON.stringify({
+          error: "rate_limited",
+          retryAfter: err.retryAfterSeconds,
+        }),
         {
-          status: 200,
+          status: 429,
           headers: {
-            "Content-Type": "text/plain; charset=utf-8",
+            "Content-Type": "application/json",
             "Cache-Control": "no-store",
             "Retry-After": String(err.retryAfterSeconds),
           },

@@ -6,6 +6,7 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   image?: string;
+  status?: boolean;
 };
 
 function getTime() {
@@ -14,6 +15,9 @@ function getTime() {
   const m = d.getMinutes().toString().padStart(2, "0");
   return `${h % 12 || 12}:${m} ${h < 12 ? "AM" : "PM"}`;
 }
+
+const MAX_RATE_RETRIES = 3;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 function TypingDots() {
   return (
@@ -114,6 +118,7 @@ export default function Chat() {
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatIdRef = useRef(0);
 
   // Mobile fit: some Android WebViews don't support dvh/svh units,
   // so we measure the real visual viewport height as a JS fallback.
@@ -136,6 +141,8 @@ export default function Chat() {
   }, [messages, loading]);
 
   const newChat = () => {
+    chatIdRef.current += 1;
+    setLoading(false);
     setMessages([]); setTimestamps([]); setPendingImage(null);
     setPendingImageName(""); setPoemMode(false); setShowWelcome(true);
   };
@@ -164,6 +171,13 @@ export default function Chat() {
 
   const sendMessage = async () => {
     if ((!input.trim() && !pendingImage) || loading) return;
+    const myChat = chatIdRef.current;
+    const stillHere = () => chatIdRef.current === myChat;
+    const setLast = (msg: Message) => {
+      if (!stillHere()) return;
+      setMessages((prev) => { const u = [...prev]; u[u.length - 1] = msg; return u; });
+    };
+
     const userText = input.trim();
     const userTime = getTime();
     const imageToSend = pendingImage;
@@ -180,17 +194,40 @@ export default function Chat() {
     setTimestamps((prev) => [...prev, userTime, ""]);
 
     try {
-      const historyForApi = messages.filter((m) => m.content !== "").map((m) => ({ role: m.role, content: m.content }));
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userText || "(She shared a photo — react naturally to what it actually is)",
-          history: historyForApi,
-          image: imageToSend || undefined,
-          poemMode,
-        }),
+      const historyForApi = messages
+        .filter((m) => m.content !== "" && !m.status)
+        .map((m) => ({ role: m.role, content: m.content }));
+      const payload = JSON.stringify({
+        message: userText || "(She shared a photo — react naturally to what it actually is)",
+        history: historyForApi,
+        image: imageToSend || undefined,
+        poemMode,
       });
+
+      // If Groq says "too many requests", wait out the countdown and retry by itself.
+      let res: Response | null = null;
+      for (let attempt = 0; attempt <= MAX_RATE_RETRIES; attempt++) {
+        res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: payload,
+        });
+        if (res.status !== 429 || attempt === MAX_RATE_RETRIES) break;
+
+        const wait = Math.min(Math.max(Math.ceil(Number(res.headers.get("retry-after")) || 8), 3), 20);
+        for (let s = wait; s > 0; s--) {
+          if (!stillHere()) return;
+          setLast({ role: "assistant", content: `one sec, catching my breath... ${s}`, status: true });
+          await sleep(1000);
+        }
+        setLast({ role: "assistant", content: "" });
+      }
+
+      if (!res) throw new Error("No response");
+      if (res.status === 429) {
+        setLast({ role: "assistant", content: "I'm a little tied up right now... try again in a minute 🌸", status: true });
+        return;
+      }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const reader = res.body?.getReader();
       if (!reader) throw new Error("No stream");
@@ -200,15 +237,15 @@ export default function Chat() {
         const { value, done } = await reader.read();
         if (done) break;
         fullText += decoder.decode(value, { stream: true });
-        setMessages((prev) => { const u = [...prev]; u[u.length - 1] = { role: "assistant", content: fullText }; return u; });
+        setLast({ role: "assistant", content: fullText });
       }
       const aiTime = getTime();
-      setTimestamps((prev) => { const u = [...prev]; u[u.length - 1] = aiTime; return u; });
+      if (stillHere()) setTimestamps((prev) => { const u = [...prev]; u[u.length - 1] = aiTime; return u; });
     } catch (e) {
       console.error(e);
-      setMessages((prev) => { const u = [...prev]; u[u.length - 1] = { role: "assistant", content: "something went sideways... give me a sec 🌸" }; return u; });
+      setLast({ role: "assistant", content: "something went sideways... give me a sec 🌸", status: true });
     } finally {
-      setLoading(false);
+      if (stillHere()) setLoading(false);
     }
   };
 
@@ -305,6 +342,7 @@ export default function Chat() {
         .msg-bubble.assistant { background: rgba(255,255,255,0.75); color: #5a3f52; border-bottom-left-radius: 5px; box-shadow: 0 4px 20px rgba(180,150,170,0.18); border: 1px solid rgba(230,160,190,0.3); backdrop-filter: blur(18px); }
         .msg-image { max-width: 200px; border-radius: 14px; margin-bottom: 8px; object-fit: cover; box-shadow: 0 4px 20px rgba(180,150,170,0.3); }
         .msg-time { font-size: 10px; color: rgba(150,110,140,0.6); margin-top: 4px; font-style: italic; }
+        .msg-bubble.status { font-style: italic; opacity: 0.7; }
 
         /* TYPING */
         .typing-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: linear-gradient(135deg, #ff9fc0, #7fd4c8); animation: typingBounce 1.2s ease-in-out infinite; }
@@ -405,12 +443,12 @@ export default function Chat() {
                         // eslint-disable-next-line @next/next/no-img-element
                         <img src={msg.image} alt="shared" className="msg-image" />
                       )}
-                      <div className={`msg-bubble ${isUser ? "user" : "assistant"}`}>
+                      <div className={`msg-bubble ${isUser ? "user" : "assistant"}${msg.status ? " status" : ""}`}>
                         {msg.content === "" && !isUser ? <TypingDots /> : msg.content}
                       </div>
                       <div className="msg-time">
                         {timestamps[i] || ""}
-                        {!isUser && msg.content && <span style={{ marginLeft: 5, opacity: 0.45 }}>🌸</span>}
+                        {!isUser && msg.content && !msg.status && <span style={{ marginLeft: 5, opacity: 0.45 }}>🌸</span>}
                       </div>
                     </div>
                   </div>
