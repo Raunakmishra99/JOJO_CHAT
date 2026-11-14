@@ -8,8 +8,6 @@ type Message = {
   image?: string;
 };
 
-const STORAGE_KEY = "raunak_chat_v2";
-
 function getTime() {
   const d = new Date();
   const h = d.getHours();
@@ -134,49 +132,18 @@ export default function Chat() {
   }, []);
 
   useEffect(() => {
-    try {
-      const saved = sessionStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const safe = (parsed.messages || []).map((m: Message) => ({ ...m, image: undefined }));
-        setMessages(safe);
-        setTimestamps(parsed.timestamps || []);
-        if (safe.length > 0) setShowWelcome(false);
-      }
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    const complete = messages.filter((m) => m.content !== "");
-    if (complete.length === 0) return;
-    try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({
-        messages: complete.map((m) => ({ role: m.role, content: m.content })),
-        timestamps,
-      }));
-    } catch {}
-  }, [messages, timestamps]);
-
-  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
-
-  useEffect(() => {
-    const clear = () => sessionStorage.removeItem(STORAGE_KEY);
-    window.addEventListener("beforeunload", clear);
-    return () => window.removeEventListener("beforeunload", clear);
-  }, []);
 
   const newChat = () => {
     setMessages([]); setTimestamps([]); setPendingImage(null);
     setPendingImageName(""); setPoemMode(false); setShowWelcome(true);
-    sessionStorage.removeItem(STORAGE_KEY);
   };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !file.type.startsWith("image/")) return;
-    if (file.size > 5 * 1024 * 1024) { alert("Keep it under 5MB missy 🌸"); return; }
+    if (file.size > 5 * 1024 * 1024) { alert("Keep it under 5MB girl 🌸"); return; }
     const reader = new FileReader();
     reader.onload = (ev) => {
       setPendingImage(ev.target?.result as string);
@@ -405,8 +372,8 @@ export default function Chat() {
           {showWelcome && messages.length === 0 ? (
             <div className="welcome">
               <div className="welcome-rose">⭐</div>
-              <div className="welcome-title">Hey Jojo...</div>
-              <div className="welcome-sub">I may not be here in person, but this is — an AI he built, carrying his voice, while he can&apos;t. Tell me how you&apos;re doing, pretty lady.</div>
+              <div className="welcome-title">Hey Shubh...</div>
+              <div className="welcome-sub">I may not be here in person, but this is — an AI he built, carrying his voice, while he can&apos;t. Tell me how you&apos;re doing, gorgeous.</div>
               <div className="welcome-hints">
                 {[
                   "✍🏼 Shall I write a poem for you...",

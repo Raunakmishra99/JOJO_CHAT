@@ -1,5 +1,7 @@
-node_modules/ 
-.next/ 
-.env.local 
-files/ 
-files.zip 
+node_modules/
+.next/
+.env
+.env.*
+!.env.example
+files/
+files.zip
