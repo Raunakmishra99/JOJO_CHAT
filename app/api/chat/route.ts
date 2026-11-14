@@ -133,9 +133,9 @@ LENGTH:
 - Never add lines simply to meet a quota.
 - Do not force a fixed number of lines or stanzas.
 
-SIGNATURE:
-End with a separate final line:
-...Raunak
+SIGNATURE (poems only):
+End a poem with a separate final line: ...Raunak
+Never add "...Raunak" or any other signature to anything that is not a poem: not to normal replies, descriptions, compliments or answers.
 
 OTHER
 
@@ -159,8 +159,11 @@ Profile context:
 ${profileText}
 `.trim();
 
-const TEXT_MODEL = process.env.GROQ_TEXT_MODEL || "openai/gpt-oss-120b";
-const VISION_MODEL = process.env.GROQ_VISION_MODEL || "qwen/qwen3.8-27b";
+// Groq rate limits are per model. When one model is busy we move straight to the
+// next one instead of making her wait. The order is the order of preference.
+// GPT-OSS can't see images, so photos only go to Qwen.
+const TEXT_MODELS = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"];
+const VISION_MODELS = ["qwen/qwen3.8-27b"];
 const MAX_HISTORY_MESSAGES = 4;
 const MAX_HISTORY_CHARS = 1200;
 
@@ -177,7 +180,8 @@ function hasImage(messages: Message[]): boolean {
 
 async function callGroq(
   messages: Message[],
-  temperature: number
+  temperature: number,
+  model: string
 ): Promise<Response> {
   const apiKey = process.env.GROQ_API_KEY;
 
@@ -185,19 +189,17 @@ async function callGroq(
     throw new Error("GROQ_API_KEY is not configured");
   }
 
-  // Text goes to GPT-OSS (supports prompt caching, so the long system prompt
-  // barely counts toward the rate limit). Photos go to Qwen (GPT-OSS is text-only).
   // GPT-OSS thinks before answering: keep that short, hide it, and leave room
-  // for those thinking tokens inside the completion cap.
-  const vision = hasImage(messages);
-  const model = vision ? VISION_MODEL : TEXT_MODEL;
-  const modelOptions = vision
-    ? { reasoning_effort: "none", max_completion_tokens: 700 }
-    : {
+  // for those thinking tokens inside the completion cap. GPT-OSS also supports
+  // prompt caching, so the long system prompt barely counts toward the limit.
+  const isGptOss = model.startsWith("openai/gpt-oss");
+  const modelOptions = isGptOss
+    ? {
         reasoning_effort: "low",
         include_reasoning: false,
         max_completion_tokens: 1200,
-      };
+      }
+    : { reasoning_effort: "none", max_completion_tokens: 700 };
 
   return fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
@@ -215,45 +217,62 @@ async function callGroq(
   });
 }
 
+function retrySeconds(res: Response, errText: string): number {
+  const retryHeader = Number(res.headers.get("retry-after"));
+  const bodyWait = errText.match(/try again in\s+([\d.]+)\s*s/i);
+
+  return retryHeader > 0
+    ? Math.ceil(retryHeader)
+    : bodyWait
+      ? Math.ceil(Number(bodyWait[1]))
+      : 10;
+}
+
 async function generate(
   messages: Message[],
   temperature: number
 ): Promise<string> {
-  const res = await callGroq(messages, temperature);
+  const models = hasImage(messages) ? VISION_MODELS : TEXT_MODELS;
+  let shortestWait = Infinity;
+  let lastError: Error | null = null;
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "unknown");
-    console.error("Groq error:", res.status, errText);
+  for (const model of models) {
+    const res = await callGroq(messages, temperature, model);
 
-    if (res.status === 429) {
-      const retryHeader = Number(res.headers.get("retry-after"));
-      const bodyWait = errText.match(/try again in\s+([\d.]+)\s*s/i);
+    if (res.ok) {
+      const data = await res.json();
+      // Temporary: shows which model answered and whether caching works.
+      console.log(
+        "model:",
+        model,
+        "prompt tokens:",
+        data?.usage?.prompt_tokens,
+        "cached:",
+        data?.usage?.prompt_tokens_details?.cached_tokens ?? 0
+      );
 
-      const retryAfterSeconds =
-        retryHeader > 0
-          ? Math.ceil(retryHeader)
-          : bodyWait
-            ? Math.ceil(Number(bodyWait[1]))
-            : 10;
+      const result = data?.choices?.[0]?.message?.content;
+      if (typeof result === "string" && result.trim()) return result.trim();
 
-      throw new GroqRateLimitError(retryAfterSeconds);
+      console.error("Empty reply from", model);
+      lastError = new Error(`Empty reply from ${model}`);
+      continue;
     }
 
-    throw new Error(`Groq responded ${res.status}: ${errText}`);
+    const errText = await res.text().catch(() => "unknown");
+    console.error("Groq error:", model, res.status, errText);
+
+    if (res.status === 429) {
+      shortestWait = Math.min(shortestWait, retrySeconds(res, errText));
+    } else {
+      lastError = new Error(`Groq responded ${res.status}: ${errText}`);
+    }
+    // Try the next model.
   }
 
-  const data = await res.json();
-  // Temporary: shows whether prompt caching is working. Remove once confirmed.
-  console.log(
-    "prompt tokens:",
-    data?.usage?.prompt_tokens,
-    "cached:",
-    data?.usage?.prompt_tokens_details?.cached_tokens ?? 0
-  );
-
-  const result = data?.choices?.[0]?.message?.content;
-
-  return typeof result === "string" ? result.trim() : "";
+  // Only ask her to wait when every model is busy.
+  if (shortestWait !== Infinity) throw new GroqRateLimitError(shortestWait);
+  throw lastError ?? new Error("No model available");
 }
 
 const norm = (t: string) =>
@@ -281,6 +300,15 @@ function isRepeat(draft: string, previous: string[]): boolean {
     });
     return shared / Math.min(wa.size, wb.size) >= 0.8;
   });
+}
+
+// The signature belongs only at the end of a poem. Strip it from everything else,
+// and keep it on its own line in poems. Also removes em dashes, which sound like AI.
+const SIGNATURE_AT_END = /\s*(?:\.{2,}|…)\s*Raunak\s*\.?\s*$/i;
+
+function cleanReply(text: string, isPoem: boolean): string {
+  const out = text.replace(/\s*[—–]\s*/g, ", ").trim();
+  return out.replace(SIGNATURE_AT_END, isPoem ? "\n\n...Raunak" : "").trim();
 }
 
 /**
@@ -340,6 +368,10 @@ export async function POST(req: Request) {
     const image =
       typeof body.image === "string" ? body.image : undefined;
     const poemMode = body.poemMode === true;
+    const isPoem =
+      poemMode || /poem|poetry|kavita|shayari|nazm|ghazal|कविता|शायरी|नज़्म|ग़ज़ल/i.test(message);
+    const gen = async (msgs: Message[], temp: number) =>
+      cleanReply(await generate(msgs, temp), isPoem);
 
     // Keep only recent, plain-text user/assistant messages.
     const safeHistory: Message[] = (
@@ -433,7 +465,7 @@ Write an original poem with a coherent emotional journey. Do not force a fixed n
     }
 
     const temperature = poemMode ? 0.9 : 0.75;
-    let text = await generate(messages, temperature);
+    let text = await gen(messages, temperature);
 
     // If the draft repeats a recent reply, try once more with extra variety.
     if (!poemMode && isRepeat(text, previousReplies)) {
@@ -444,7 +476,7 @@ Write an original poem with a coherent emotional journey. Do not force a fixed n
             .replace(/\s+/g, " ")
             .slice(0, 200)}" repeats what you already said. Write something completely different: respond to what she just said, in new words.]`
         );
-        const second = await generate(retry, 0.95);
+        const second = await gen(retry, 0.95);
         if (second) text = second;
       } catch {
         // keep the first draft
